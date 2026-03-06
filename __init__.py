@@ -43,7 +43,7 @@ class MAGDaemon(mqtt.Client):
         top_path = Path(inspect.stack().pop().filename).parent.absolute()
 
         try:
-            l_logger = self._m_logger
+            l_logger = self.__logger
         except AttributeError:
             l_logger = self.logger
         l_logger.debug(f"Top path at {top_path}")
@@ -82,10 +82,10 @@ class MAGDaemon(mqtt.Client):
             if type(logging.getLevelName(loglevel)) is int:
                 log_obj.setLevel(loglevel)
             else:
-                self._m_logger.warning(f"{name} log level not configured. Defaulting to WARNING.")
+                self.__logger.warning(f"{name} log level not configured. Defaulting to WARNING.")
                 self.log_obj.setLevel("WARNING")
         except (KeyError, AttributeError) as e:
-            self._m_logger.warning(f"{name} log level not configured. Defaulting to WARNING. Caught: {str(e)}")
+            self.__logger.warning(f"{name} log level not configured. Defaulting to WARNING. Caught: {str(e)}")
             log_obj.setLevel("WARNING")
 
     def __init__(self, long_name, cfg_file_name):
@@ -98,8 +98,8 @@ class MAGDaemon(mqtt.Client):
         """
 
         """ set logging for this module """
-        self._m_logger = logging.getLogger(__name__)
-        self._m_logger.setLevel(logging.DEBUG) # starts as debug when in devel
+        self.__logger = logging.getLogger(__name__)
+        self.__logger.setLevel(logging.DEBUG) # starts as debug when in devel
 
         """ set signal handlers """
         signal.signal(signal.SIGINT, self.signal_handler)
@@ -110,19 +110,20 @@ class MAGDaemon(mqtt.Client):
             self.set_config(long_name, cfg_file_name)
 
         """ log levels """
-        self.config_log(self._m_logger, self.config.daemon)
+        self.config_log(self.__logger, self.config.daemon)
 
         self._mqtt_logger = logging.getLogger("PAHO")
         self.config_log(self._mqtt_logger, self.config.mqtt)
 
-        self._m_logger.info("Starting MQTT")
+        self.__logger.info("Starting MQTT")
         super().__init__(mqtt.CallbackAPIVersion.VERSION2, self.config.name)
 
     def signal_handler(self, signum, _):
         """ signal handler helper function """
-        self._m_logger.critical(f"Caught a deadly signal: {signal.Signals(signum).name}")
+        self.__logger.critical(f"Caught a deadly signal: {signal.Signals(signum).name}")
         self._connect_evt.set()
         self.exit_evt.set()
+        self._thread_terminate = True
 
     def on_log(self, client, userdata, level, buf):
         if level == mqtt.MQTT_LOG_DEBUG:
@@ -139,53 +140,47 @@ class MAGDaemon(mqtt.Client):
     def on_connect(self, client, userdata, flags, rc, properties):
         """ subscribes to the relevant channels """
         if rc.is_failure:
-            self._m_logger.warning(f"Temporary failure to connect: {str(rc)}")
+            self.__logger.warning(f"Temporary failure to connect: {str(rc)}")
         else:
-            self._m_logger.info(f"Connected {str(rc)}")
+            self.__logger.info(f"Connected {str(rc)}")
             for src in self.config.mqtt.data_sources:
-                self._m_logger.debug(f"Subscribing to {src}")
+                self.__logger.debug(f"Subscribing to {src}")
                 self.subscribe(src)
             self._connect_evt.set()
             try:
-                self._m_logger.debug("Collecting the disconnect thread.")
+                self.__logger.debug("Collecting the disconnect thread.")
                 self._disconnect_thread.join()
-                self._m_logger.info("Collected the disconnect thread")
+                self.__logger.info("Collected the disconnect thread")
             except AttributeError as e:
-                self._m_logger.debug(f"Expected exception: {e}")
+                self.__logger.debug(f"Expected exception: {e}")
                 pass
 
     def on_disconnect(self, client, userdata, flags, rc, properties):
         """ handles mqtt disconnects """
         self._connect_evt.clear()
         if rc.is_failure:
-            self._m_logger.debug(f"Received: {rc}")
-            self._m_logger.debug(traceback.extract_stack())
+            self.__logger.debug(f"Received: {rc}")
+            self.__logger.debug(traceback.extract_stack())
             if self._disconnect_thread is None or not self._disconnect_thread.is_alive():
-                self._m_logger.warning("Unexpected disconnect.  Starting disconnect timer.")
+                self.__logger.warning("Unexpected disconnect.  Starting disconnect timer.")
                 self._disconnect_thread = Thread(target=self._discon_thread_fun)
                 self._disconnect_thread.start()
             else:
-                self._m_logger.debug("Duplicate on_disconnect call")
-                while not self._connect_evt.wait(timeout=1):
-                    try: 
-                        self.reconnect()
-                        self._m_logger.info("Reconnected, setting the connect event.")
-                        self._connect_evt.set()
-                    except Exception as e:
-                        self._m_logger.debug(f"Caught on reconnect: {e}")
+                self.__logger.debug("Duplicate on_disconnect call")
         else:
-            self._m_logger.info("Disconnected gracefully")
+            self.__logger.info("Disconnected gracefully")
 
     def _discon_thread_fun(self):
         """ sets the exit event if the timeout is not set in time """
-        self._m_logger.debug("Disconnect timer started.")
+        self.__logger.debug("Disconnect timer started.")
         if not self._connect_evt.wait(self.config.mqtt.dis_timeout):
-            self._m_logger.critical("Disconnect timer triggering program exit.")
+            self.__logger.critical("Disconnect timer triggering program exit.")
             self.exit_evt.set()
+            self._thread_terminate = True
             """ some parts are hung on the connect event, so we set it. """
             self._connect_evt.set()
-        self._m_logger.debug("Disconnect timer ended.")
+        self.__logger.debug("Disconnect timer ended.")
 
     def main(self):
-        self._m_logger.info("MQTT Connecting")
+        self.__logger.info("MQTT Connecting")
         self.connect(host=self.config.mqtt.broker, port=self.config.mqtt.port, keepalive=self.config.mqtt.timeout) 
