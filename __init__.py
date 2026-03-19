@@ -33,6 +33,7 @@ class MAGDaemon(mqtt.Client):
 
     _connect_evt = Event()
     exit_evt = Event()
+    exit_code = os.EX_OK
     checkup_evt = Event()
     logger = None
     config = None
@@ -177,6 +178,7 @@ class MAGDaemon(mqtt.Client):
             self.__logger.critical("Disconnect timer triggering program exit.")
             self.exit_evt.set()
             self._thread_terminate = True
+            self.exit_code = os.EX_TEMPFAIL
             """ some parts are hung on the connect event, so we set it. """
             self._connect_evt.set()
         self.__logger.debug("Disconnect timer ended.")
