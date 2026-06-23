@@ -38,6 +38,7 @@ class MAGDaemon(mqtt.Client):
     logger = None
     config = None
     _disconnect_thread = None
+    disconnects_critical = False
 
     def set_config(self, long_name, cfg_file_name):
         files = []
@@ -162,7 +163,14 @@ class MAGDaemon(mqtt.Client):
         if rc.is_failure:
             self.__logger.debug(f"Received: {rc}")
             self.__logger.debug(traceback.extract_stack())
-            if self._disconnect_thread is None or not self._disconnect_thread.is_alive():
+            if self.disconnects_critical:
+                self.__logger.critical("Unexpected disconnect. Exiting.")
+                self.exit_evt.set()
+                self._thread_terminate = True
+                self.exit_code = os.EX_TEMPFAIL
+                """ some parts are hung on the connect event, so we set it. """
+                self._connect_evt.set()
+            elif self._disconnect_thread is None or not self._disconnect_thread.is_alive():
                 self.__logger.warning("Unexpected disconnect.  Starting disconnect timer.")
                 self._disconnect_thread = Thread(target=self._discon_thread_fun)
                 self._disconnect_thread.start()
